@@ -1,91 +1,121 @@
-import React, { useState } from 'react';
-import { supabase } from '../lib/supabase';
-import { ArrowRight, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { useState, FormEvent } from 'react'
+import { supabase } from '../lib/supabase'
 
-export const EmailForm: React.FC = () => {
-    const [email, setEmail] = useState('');
-    const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
-    const [message, setMessage] = useState('');
+// Helper to get URL parameters
+const getUrlParams = () => {
+    const params = new URLSearchParams(window.location.search)
+    return {
+        gclid: params.get('gclid') || undefined,
+        utm_source: params.get('utm_source') || undefined,
+        utm_medium: params.get('utm_medium') || undefined,
+        utm_campaign: params.get('utm_campaign') || undefined,
+    }
+}
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!email) return;
+export function EmailForm() {
+    const [email, setEmail] = useState('')
+    const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
+    const [errorMessage, setErrorMessage] = useState('')
 
-        setStatus('loading');
+    const validateEmail = (email: string) => {
+        const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+        return regex.test(email)
+    }
 
-        // Basic email validation
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(email)) {
-            setStatus('error');
-            setMessage('Please enter a valid email address.');
-            return;
+    const handleSubmit = async (e: FormEvent) => {
+        e.preventDefault()
+
+        // Validation
+        if (!email || !validateEmail(email)) {
+            setStatus('error')
+            setErrorMessage('Please enter a valid email address')
+            return
         }
+
+        setStatus('loading')
+        setErrorMessage('')
 
         try {
+            // Get tracking parameters
+            const trackingParams = getUrlParams()
+
+            // Insert into Supabase
             const { error } = await supabase
                 .from('subscribers')
-                .insert([{ email }]);
+                .insert({
+                    email: email.toLowerCase().trim(),
+                    source: 'coming_soon_page',
+                    ...trackingParams
+                })
 
-            if (error) throw error;
-
-            setStatus('success');
-            setMessage('Thanks for subscribing! We\'ll keep you posted.');
-            setEmail('');
-        } catch (error: any) {
-            console.error('Error:', error);
-            // Handle duplicate email error specifically if possible, or generic
-            if (error.code === '23505') { // Unique violation code for Postgres
-                setStatus('success'); // Treat duplicate as success to not leak info or just be nice
-                setMessage("You're already on the list!");
+            if (error) {
+                // Handle duplicate email error gracefully
+                if (error.code === '23505') {
+                    setStatus('success') // Still show success (user is already subscribed)
+                } else {
+                    throw error
+                }
             } else {
-                setStatus('error');
-                setMessage('Something went wrong. Please try again.');
+                setStatus('success')
             }
+
+            // Clear form
+            setEmail('')
+
+            // Optional: Track conversion event
+            if (window.gtag && trackingParams.gclid) {
+                window.gtag('event', 'conversion', {
+                    'send_to': 'AW-XXXXXXXXX/XXXXXX', // Replace with your Google Ads conversion ID
+                    'transaction_id': trackingParams.gclid
+                })
+            }
+
+        } catch (error: any) {
+            console.error('Subscription error:', error)
+            setStatus('error')
+            setErrorMessage('Something went wrong. Please try again.')
         }
-    };
+    }
 
     return (
-        <div className="w-full max-w-md mx-auto relative z-20">
-            <form onSubmit={handleSubmit} className="relative">
-                <div className="relative group">
+        <div className="w-full max-w-md mx-auto">
+            <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="flex flex-col sm:flex-row gap-3">
                     <input
                         type="email"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
-                        placeholder="Enter your email address"
+                        placeholder="Enter your email"
                         disabled={status === 'loading' || status === 'success'}
-                        className="w-full px-6 py-4 bg-white/5 border border-white/10 rounded-full text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all duration-300 backdrop-blur-sm pr-36"
+                        className="flex-1 px-6 py-4 bg-white/10 backdrop-blur-sm border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                     />
                     <button
                         type="submit"
                         disabled={status === 'loading' || status === 'success'}
-                        className="absolute right-2 top-2 bottom-2 px-6 bg-emerald-600 hover:bg-emerald-500 text-white rounded-full font-medium transition-all duration-300 flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed shadow-lg shadow-emerald-900/20"
+                        className="px-8 py-4 bg-emerald-500 hover:bg-emerald-600 text-white font-semibold rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-105 active:scale-95"
                     >
-                        {status === 'loading' ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : status === 'success' ? (
-                            <>
-                                <span>Joined</span>
-                                <CheckCircle className="w-4 h-4" />
-                            </>
-                        ) : (
-                            <>
-                                <span>Notify Me</span>
-                                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                            </>
-                        )}
+                        {status === 'loading' ? 'Joining...' : status === 'success' ? '✓ Joined!' : 'Notify Me'}
                     </button>
                 </div>
+
+                {/* Status Messages */}
+                {status === 'success' && (
+                    <p className="text-emerald-400 text-sm text-center animate-fade-in">
+                        🎉 Success! You'll be the first to know when we launch.
+                    </p>
+                )}
+
+                {status === 'error' && errorMessage && (
+                    <p className="text-red-400 text-sm text-center animate-fade-in">
+                        {errorMessage}
+                    </p>
+                )}
             </form>
 
-            {/* Feedback Message */}
-            {status !== 'idle' && (
-                <div className={`mt-4 flex items-center justify-center gap-2 text-sm font-medium animate-fade-in ${status === 'error' ? 'text-red-400' : 'text-emerald-400'
-                    }`}>
-                    {status === 'error' ? <AlertCircle className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
-                    <span>{message}</span>
-                </div>
-            )}
+            {/* Social Proof (Optional) */}
+            <p className="mt-4 text-white/50 text-xs text-center">
+                Join the waitlist • No spam, ever
+            </p>
         </div>
-    );
-};
+    )
+}
