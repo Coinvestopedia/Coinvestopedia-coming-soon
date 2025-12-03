@@ -57,6 +57,11 @@ export function EmailForm() {
                 }
             } else {
                 setStatus('success')
+                    // Track successful form submission
+                    ; (window as any).dataLayer = (window as any).dataLayer || []
+                    ; (window as any).dataLayer.push({
+                        'event': 'form_success'
+                    })
             }
 
             // Clear form
